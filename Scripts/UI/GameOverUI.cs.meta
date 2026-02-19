@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: 5f5782ec29dd86e4ebcdeff578be5eef
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - panel: {instanceID: 0}
+  - restartButton: {instanceID: 0}
+  - titleObject: {instanceID: 0}
+  - summaryText: {instanceID: 0}
+  - summaryFont: {fileID: 12800000, guid: d7cffddcbc0cc8f4ebe6e28eb9804082, type: 3}
+  - baseHealth: {instanceID: 0}
+  - waveManager: {instanceID: 0}
+  - gameManager: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: c673dd5396e555a48bbb9125f9dedf19
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - freezeUseSound: {fileID: 8300000, guid: c91fcf414acc0344cb03b13996f1bf3b, type: 3}
+  - megaStrikeUseSound: {fileID: 8300000, guid: a652877b012108e41871f867ada9f176, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
