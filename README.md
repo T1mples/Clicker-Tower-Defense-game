@@ -1,3 +1,4 @@
 # Clicker-Tower-Defense-game
-Game name: Corefall: Last Node
-Unity Project for UrFU 
+Game name: Slime Attack!
+Project for UrFU
+Made by Timofey Poligetsky 
