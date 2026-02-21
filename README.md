@@ -2,3 +2,4 @@
 Game name: Slime Attack!
 Project for UrFU
 Made by Timofey Poligetsky 
+Link: https://yandex.com/games/app/500966?draft=true&lang=ru
