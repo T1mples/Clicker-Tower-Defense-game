@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using YG;
 
 namespace ClickerTowerDefense
 {
@@ -25,6 +26,9 @@ namespace ClickerTowerDefense
         [SerializeField, Range(0f, 1f)] private float freezeUseVolume = 1f;
         [SerializeField] private AudioClip megaStrikeUseSound;
         [SerializeField, Range(0f, 1f)] private float megaStrikeUseVolume = 1f;
+        [Header("Runtime Fallback (Build)")]
+        [SerializeField] private string freezeUseSoundResourcesPath = "Audio/SkillFreeze";
+        [SerializeField] private string megaStrikeUseSoundResourcesPath = "Audio/SkillMegaStrike";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
@@ -51,6 +55,10 @@ namespace ClickerTowerDefense
         private BaseHealth baseHealth;
         private bool isGameOver;
         private AudioSource sfxAudioSource;
+        private bool cooldownPausedByFocus;
+        private bool cooldownPausedByMenu;
+        private float remainingCooldownAtPause;
+        private bool lastMenuOpenState;
 
         private void Awake()
         {
@@ -65,6 +73,7 @@ namespace ClickerTowerDefense
             SceneManager.sceneLoaded -= OnSceneLoaded;
             SceneManager.sceneLoaded += OnSceneLoaded;
             EnsureAudioSource();
+            EnsureSkillUseAudioLoaded();
             gameManager = GameManager.Instance;
             enemySpawner = FindFirstObjectByType<EnemySpawner>();
             baseHealth = FindFirstObjectByType<BaseHealth>();
@@ -72,6 +81,10 @@ namespace ClickerTowerDefense
             {
                 baseHealth.GameOverEvent += OnGameOver;
             }
+
+            YG2.onHideWindowGame += OnWindowHidden;
+            YG2.onShowWindowGame += OnWindowShown;
+            lastMenuOpenState = GameMenuUI.IsMenuOpen;
         }
 
         private void OnDestroy()
@@ -85,6 +98,28 @@ namespace ClickerTowerDefense
             if (baseHealth != null)
             {
                 baseHealth.GameOverEvent -= OnGameOver;
+            }
+
+            YG2.onHideWindowGame -= OnWindowHidden;
+            YG2.onShowWindowGame -= OnWindowShown;
+        }
+
+        private void Update()
+        {
+            bool menuOpen = GameMenuUI.IsMenuOpen;
+            if (menuOpen == lastMenuOpenState)
+            {
+                return;
+            }
+
+            lastMenuOpenState = menuOpen;
+            if (menuOpen)
+            {
+                OnMenuOpened();
+            }
+            else
+            {
+                OnMenuClosed();
             }
         }
 
@@ -146,7 +181,7 @@ namespace ClickerTowerDefense
 
         public bool CanUseNow()
         {
-            return !isGameOver && OwnedSkill != SkillType.None && Time.unscaledTime >= NextUseTime;
+            return !isGameOver && !IsCooldownPaused() && OwnedSkill != SkillType.None && Time.unscaledTime >= NextUseTime;
         }
 
         public bool TryUseOwnedSkill()
@@ -176,6 +211,11 @@ namespace ClickerTowerDefense
 
         public float GetRemainingCooldown()
         {
+            if (IsCooldownPaused())
+            {
+                return Mathf.Max(0f, remainingCooldownAtPause);
+            }
+
             return Mathf.Max(0f, NextUseTime - Time.unscaledTime);
         }
 
@@ -256,6 +296,7 @@ namespace ClickerTowerDefense
         {
             if (clip == null)
             {
+                Debug.LogWarning("[SkillSystem] Skill use sound is missing.");
                 return;
             }
 
@@ -263,6 +304,19 @@ namespace ClickerTowerDefense
             if (sfxAudioSource != null)
             {
                 sfxAudioSource.PlayOneShot(clip, volume * AudioSettings.SfxVolume);
+            }
+        }
+
+        private void EnsureSkillUseAudioLoaded()
+        {
+            if (freezeUseSound == null && !string.IsNullOrWhiteSpace(freezeUseSoundResourcesPath))
+            {
+                freezeUseSound = Resources.Load<AudioClip>(freezeUseSoundResourcesPath);
+            }
+
+            if (megaStrikeUseSound == null && !string.IsNullOrWhiteSpace(megaStrikeUseSoundResourcesPath))
+            {
+                megaStrikeUseSound = Resources.Load<AudioClip>(megaStrikeUseSoundResourcesPath);
             }
         }
 
@@ -290,7 +344,96 @@ namespace ClickerTowerDefense
             OwnedSkill = SkillType.None;
             NextUseTime = 0f;
             isGameOver = false;
+            cooldownPausedByFocus = false;
+            cooldownPausedByMenu = false;
+            remainingCooldownAtPause = 0f;
+            lastMenuOpenState = GameMenuUI.IsMenuOpen;
             StateChanged?.Invoke();
+        }
+
+        private void OnWindowHidden()
+        {
+            if (cooldownPausedByFocus)
+            {
+                return;
+            }
+
+            PauseCooldown();
+            cooldownPausedByFocus = true;
+            StateChanged?.Invoke();
+        }
+
+        private void OnWindowShown()
+        {
+            if (!cooldownPausedByFocus)
+            {
+                return;
+            }
+
+            cooldownPausedByFocus = false;
+            TryResumeCooldown();
+            StateChanged?.Invoke();
+        }
+
+        private void OnMenuOpened()
+        {
+            if (cooldownPausedByMenu)
+            {
+                return;
+            }
+
+            PauseCooldown();
+            cooldownPausedByMenu = true;
+            StateChanged?.Invoke();
+        }
+
+        private void OnMenuClosed()
+        {
+            if (!cooldownPausedByMenu)
+            {
+                return;
+            }
+
+            cooldownPausedByMenu = false;
+            TryResumeCooldown();
+            StateChanged?.Invoke();
+        }
+
+        private void PauseCooldown()
+        {
+            if (IsCooldownPaused())
+            {
+                return;
+            }
+
+            float remaining = Mathf.Max(0f, NextUseTime - Time.unscaledTime);
+            if (remaining <= 0f)
+            {
+                return;
+            }
+
+            remainingCooldownAtPause = remaining;
+        }
+
+        private void TryResumeCooldown()
+        {
+            if (IsCooldownPaused())
+            {
+                return;
+            }
+
+            if (remainingCooldownAtPause <= 0f)
+            {
+                return;
+            }
+
+            NextUseTime = Time.unscaledTime + remainingCooldownAtPause;
+            remainingCooldownAtPause = 0f;
+        }
+
+        private bool IsCooldownPaused()
+        {
+            return cooldownPausedByFocus || cooldownPausedByMenu;
         }
     }
 }

@@ -1,35 +1,57 @@
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class UIRain : MonoBehaviour
 {
     [Header("Parent")]
-    public RectTransform parent;          // RainLayer (Panel)
+    public RectTransform parent;
 
     [Header("Drop Prefab")]
-    public Image dropPrefab;              // Prefab капли (UI Image)
+    public Image dropPrefab;
 
     [Header("Rain Settings")]
-    public int spawnPerSecond = 120;      // сколько капель в секунду
+    public int spawnPerSecond = 120;
     public Vector2 speedMinMax = new Vector2(400f, 900f);
 
     [Header("Pool Settings")]
-    public int poolSize = 400;            // максимум капель на экране
-    public float spawnPadding = 50f;
+    public int poolSize = 400;
+    public float spawnPadding = 0f;
+    public bool ensureRectMaskOnParent = true;
+
+    [Header("Safety")]
+    public bool cleanupNonPoolDrops = true;
+    public float cleanupInterval = 1f;
 
     private Image[] pool;
     private RectTransform[] poolRT;
     private float[] speed;
+    private readonly HashSet<int> poolIds = new HashSet<int>();
+    private readonly Vector3[] parentWorldCorners = new Vector3[4];
 
     private int index;
     private float spawnAcc;
+    private float cleanupTimer;
 
-    void Awake()
+    private void Awake()
     {
         if (parent == null)
+        {
             parent = (RectTransform)transform;
+        }
 
-        // создаём пул объектов
+        if (dropPrefab == null)
+        {
+            enabled = false;
+            return;
+        }
+
+        if (ensureRectMaskOnParent && parent.GetComponent<RectMask2D>() == null)
+        {
+            parent.gameObject.AddComponent<RectMask2D>();
+        }
+
+        poolSize = Mathf.Max(1, poolSize);
         pool = new Image[poolSize];
         poolRT = new RectTransform[poolSize];
         speed = new float[poolSize];
@@ -37,69 +59,130 @@ public class UIRain : MonoBehaviour
         for (int i = 0; i < poolSize; i++)
         {
             Image img = Instantiate(dropPrefab, parent);
+            RectTransform rt = img.rectTransform;
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+
             img.raycastTarget = false;
-            img.enabled = false;
+            img.gameObject.SetActive(false);
 
             pool[i] = img;
-            poolRT[i] = img.rectTransform;
+            poolRT[i] = rt;
+            poolIds.Add(img.gameObject.GetInstanceID());
         }
     }
 
-    void Update()
+    private void Update()
     {
         float dt = Time.unscaledDeltaTime;
 
-        // Спавн капель
-        spawnAcc += spawnPerSecond * dt;
+        spawnAcc += Mathf.Max(0, spawnPerSecond) * dt;
         while (spawnAcc >= 1f)
         {
             SpawnDrop();
             spawnAcc -= 1f;
         }
 
-        // Движение капель вниз
-        Vector2 size = parent.rect.size;
-        float bottomY = -size.y * 0.5f - spawnPadding;
+        parent.GetWorldCorners(parentWorldCorners);
+        float parentBottomWorldY = parentWorldCorners[0].y;
 
         for (int i = 0; i < poolSize; i++)
         {
-            if (!pool[i].enabled)
+            Image img = pool[i];
+            if (img == null || !img.gameObject.activeSelf)
+            {
                 continue;
+            }
 
-            Vector2 pos = poolRT[i].anchoredPosition;
+            RectTransform rt = poolRT[i];
+            Vector2 pos = rt.anchoredPosition;
             pos.y -= speed[i] * dt;
-            poolRT[i].anchoredPosition = pos;
+            rt.anchoredPosition = pos;
 
-            // Удаляем каплю если ушла вниз
-            if (pos.y < bottomY)
-                pool[i].enabled = false;
+            float dropHalfHWorld = rt.rect.height * rt.lossyScale.y * 0.5f;
+            float dropBottomWorldY = rt.position.y - dropHalfHWorld;
+            if (dropBottomWorldY <= parentBottomWorldY - spawnPadding)
+            {
+                img.gameObject.SetActive(false);
+            }
+        }
+
+        if (cleanupNonPoolDrops)
+        {
+            cleanupTimer += dt;
+            if (cleanupTimer >= Mathf.Max(0.1f, cleanupInterval))
+            {
+                cleanupTimer = 0f;
+                CleanupLeakedDrops();
+            }
         }
     }
 
-    void SpawnDrop()
+    private void SpawnDrop()
     {
-        Vector2 size = parent.rect.size;
-        float halfW = size.x * 0.5f;
-        float halfH = size.y * 0.5f;
-
         Image img = pool[index];
         RectTransform rt = poolRT[index];
-
         int id = index;
         index = (index + 1) % poolSize;
 
-        img.enabled = true;
+        if (img == null || rt == null)
+        {
+            return;
+        }
 
-        // Позиция сверху экрана
-        float x = Random.Range(-halfW - spawnPadding, halfW + spawnPadding);
-        float y = halfH + spawnPadding;
+        float parentXMin = parent.rect.xMin;
+        float parentXMax = parent.rect.xMax;
+        float parentYMax = parent.rect.yMax;
+
+        float dropHalfW = rt.rect.width * 0.5f;
+        float dropHalfH = rt.rect.height * 0.5f;
+
+        float minX = parentXMin + dropHalfW + spawnPadding;
+        float maxX = parentXMax - dropHalfW - spawnPadding;
+        if (minX > maxX)
+        {
+            minX = maxX = 0f;
+        }
+
+        float x = Random.Range(minX, maxX);
+        float y = parentYMax - dropHalfH;
 
         rt.anchoredPosition = new Vector2(x, y);
-
-        // Без поворота
         rt.localRotation = Quaternion.identity;
 
-        // Скорость падения
         speed[id] = Random.Range(speedMinMax.x, speedMinMax.y);
+        img.gameObject.SetActive(true);
+    }
+
+    private void CleanupLeakedDrops()
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        string expectedName = dropPrefab != null ? dropPrefab.gameObject.name : string.Empty;
+        for (int i = parent.childCount - 1; i >= 0; i--)
+        {
+            Transform child = parent.GetChild(i);
+            if (child == null)
+            {
+                continue;
+            }
+
+            GameObject go = child.gameObject;
+            if (poolIds.Contains(go.GetInstanceID()))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(expectedName) && !go.name.StartsWith(expectedName))
+            {
+                continue;
+            }
+
+            Destroy(go);
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using UnityEngine;
+using YG;
 
 namespace ClickerTowerDefense
 {
@@ -34,6 +35,7 @@ namespace ClickerTowerDefense
         [SerializeField] private AudioClip backgroundMusic;
         [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = 0.5f;
         [SerializeField] private float backgroundMusicStartDelay = 5f;
+        [SerializeField] private bool debugMusicLogs = true;
 
         public int Coins { get; private set; }
         public int Score { get; private set; }
@@ -41,6 +43,7 @@ namespace ClickerTowerDefense
         public event Action<int> ScoreChanged;
         private AudioSource sfxAudioSource;
         private AudioSource musicAudioSource;
+        private AudioSource gameplayStartAudioSource;
         private BaseHealth baseHealth;
         private bool musicPausedByStartScreen;
         private Coroutine delayedMusicCoroutine;
@@ -60,7 +63,6 @@ namespace ClickerTowerDefense
             CoinsChanged?.Invoke(Coins);
             ScoreChanged?.Invoke(Score);
             ResolveBaseHealth();
-            StartMusicWithDelay();
         }
 
         private void OnDestroy()
@@ -188,6 +190,45 @@ namespace ClickerTowerDefense
             return AudioSettings.MusicVolume;
         }
 
+        public void StopMusicAndCountdown()
+        {
+            if (delayedMusicCoroutine != null)
+            {
+                LogMusic("StopMusicAndCountdown: stop pending music countdown.");
+                StopCoroutine(delayedMusicCoroutine);
+                delayedMusicCoroutine = null;
+            }
+
+            LogMusic("StopMusicAndCountdown: stop current music.");
+            StopMusic();
+        }
+
+        public void BeginGameplayMusicCountdown()
+        {
+            EnsureAudioSources();
+            if (musicAudioSource == null)
+            {
+                LogMusic("BeginGameplayMusicCountdown skipped: missing music audio source.");
+                return;
+            }
+
+            bool gameOver = baseHealth != null && baseHealth.IsGameOver;
+            if (gameOver || StartScreenUI.IsOpen)
+            {
+                LogMusic("BeginGameplayMusicCountdown skipped: game over or start screen is open.");
+                return;
+            }
+
+            if (musicAudioSource.isPlaying || delayedMusicCoroutine != null)
+            {
+                LogMusic("BeginGameplayMusicCountdown skipped: already playing or countdown is active.");
+                return;
+            }
+
+            LogMusic("BeginGameplayMusicCountdown: scheduling music countdown for gameplay start.");
+            StartMusicWithDelay();
+        }
+
         private void PlayOneShot(AudioClip clip, float volume)
         {
             if (clip == null)
@@ -219,6 +260,12 @@ namespace ClickerTowerDefense
                 musicAudioSource = gameObject.AddComponent<AudioSource>();
             }
             ConfigureMusicSource(musicAudioSource);
+
+            if (gameplayStartAudioSource == null)
+            {
+                gameplayStartAudioSource = gameObject.AddComponent<AudioSource>();
+            }
+            ConfigureSfxSource(gameplayStartAudioSource);
         }
 
         private void ConfigureSfxSource(AudioSource source)
@@ -252,33 +299,60 @@ namespace ClickerTowerDefense
             EnsureAudioSources();
             if (musicAudioSource == null || backgroundMusic == null)
             {
+                LogMusic("StartMusic skipped: audio source or clip is missing.");
                 return;
             }
 
             musicAudioSource.clip = backgroundMusic;
             UpdateMusicVolume();
             musicAudioSource.Play();
+            LogMusic("Music started.");
         }
 
         private void StartMusicWithDelay()
         {
             if (delayedMusicCoroutine != null)
             {
+                LogMusic("StartMusicWithDelay: replacing existing countdown.");
                 StopCoroutine(delayedMusicCoroutine);
             }
 
+            LogMusic($"StartMusicWithDelay: countdown started ({Mathf.Max(0f, backgroundMusicStartDelay):0.##}s).");
             delayedMusicCoroutine = StartCoroutine(PlayMusicDelayed());
         }
 
         private IEnumerator PlayMusicDelayed()
         {
-            float delay = Mathf.Max(0f, backgroundMusicStartDelay);
-            if (delay > 0f)
+            float remaining = Mathf.Max(0f, backgroundMusicStartDelay);
+            bool wasBlockedByExternalState = false;
+
+            while (remaining > 0f)
             {
-                yield return new WaitForSecondsRealtime(delay);
+                bool blocked = IsCountdownBlocked();
+                if (blocked)
+                {
+                    if (!wasBlockedByExternalState)
+                    {
+                        LogMusic($"PlayMusicDelayed: paused (ads/focus), remaining {remaining:0.##}s.");
+                    }
+
+                    wasBlockedByExternalState = true;
+                    yield return null;
+                    continue;
+                }
+
+                if (wasBlockedByExternalState)
+                {
+                    LogMusic($"PlayMusicDelayed: resumed, remaining {remaining:0.##}s.");
+                    wasBlockedByExternalState = false;
+                }
+
+                remaining -= Time.unscaledDeltaTime;
+                yield return null;
             }
 
             delayedMusicCoroutine = null;
+            LogMusic("PlayMusicDelayed: countdown finished.");
             StartMusic();
         }
 
@@ -291,6 +365,7 @@ namespace ClickerTowerDefense
 
             musicAudioSource.Stop();
             musicPausedByStartScreen = false;
+            LogMusic("Music stopped.");
         }
 
         private void UpdateMusicVolume()
@@ -319,12 +394,28 @@ namespace ClickerTowerDefense
 
         private void OnGameOver()
         {
-            StopMusic();
+            StopMusicAndCountdown();
         }
 
         public void PlayGameplayStartSound()
         {
-            PlayOneShot(gameStartSound, gameStartVolume);
+            if (gameStartSound == null)
+            {
+                return;
+            }
+
+            EnsureAudioSources();
+            if (gameplayStartAudioSource == null)
+            {
+                return;
+            }
+
+            // Force restart from beginning even if this method fires more than once.
+            gameplayStartAudioSource.Stop();
+            gameplayStartAudioSource.clip = gameStartSound;
+            gameplayStartAudioSource.time = 0f;
+            gameplayStartAudioSource.volume = gameStartVolume * AudioSettings.SfxVolume;
+            gameplayStartAudioSource.Play();
         }
 
         private void SyncMusicPauseWithStartScreen()
@@ -356,6 +447,21 @@ namespace ClickerTowerDefense
 
                 musicPausedByStartScreen = false;
             }
+        }
+
+        private void LogMusic(string message)
+        {
+            if (!debugMusicLogs)
+            {
+                return;
+            }
+
+            Debug.Log("[Music] " + message);
+        }
+
+        private static bool IsCountdownBlocked()
+        {
+            return YG2.nowAdsShow || !YG2.isFocusWindowGame || GameMenuUI.IsMenuOpen;
         }
     }
 }

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using YG;
 
 namespace ClickerTowerDefense
 {
@@ -90,6 +91,8 @@ namespace ClickerTowerDefense
 
         private void OnGameOver()
         {
+            TrySaveBestScore();
+
             if (pauseOnGameOver)
             {
                 Time.timeScale = 0f;
@@ -110,6 +113,30 @@ namespace ClickerTowerDefense
             PlayGameOverSound();
         }
 
+        private void TrySaveBestScore()
+        {
+            if (gameManager == null)
+            {
+                gameManager = GameManager.Instance;
+            }
+
+            if (gameManager == null || YG2.saves == null)
+            {
+                return;
+            }
+
+            if (gameManager.Score <= YG2.saves.score)
+            {
+                return;
+            }
+
+            YG2.saves.score = gameManager.Score;
+            YG2.SaveProgress();
+            Debug.Log("saved on cloud");
+            YG2.SetLeaderboard("LB", gameManager.Score);
+            Debug.Log("send to leaderboard: " + gameManager.Score);
+        }
+
         private void OnRestartClicked()
         {
             Time.timeScale = 1f;
@@ -118,6 +145,12 @@ namespace ClickerTowerDefense
             {
                 baseHealth.RestartScene();
                 return;
+            }
+
+            GameManager gameManager = GameManager.Instance;
+            if (gameManager != null)
+            {
+                gameManager.StopMusicAndCountdown();
             }
 
             UnityEngine.SceneManagement.Scene activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
@@ -287,21 +320,53 @@ namespace ClickerTowerDefense
 
         private void HideOtherUi()
         {
-            Transform parent = transform.parent;
-            if (parent == null)
+            Scene scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded)
             {
                 return;
             }
 
-            for (int i = 0; i < parent.childCount; i++)
+            Transform keepTransform = panel != null ? panel.transform : transform;
+            Transform keepCanvasRoot = keepTransform.root;
+
+            if (keepTransform.parent != null)
             {
-                Transform child = parent.GetChild(i);
-                if (child == transform)
+                Transform parent = keepTransform.parent;
+                for (int i = 0; i < parent.childCount; i++)
+                {
+                    Transform child = parent.GetChild(i);
+                    if (child == keepTransform)
+                    {
+                        continue;
+                    }
+
+                    child.gameObject.SetActive(false);
+                }
+            }
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int i = 0; i < roots.Length; i++)
+            {
+                GameObject root = roots[i];
+                if (root == null || !root.activeSelf)
                 {
                     continue;
                 }
 
-                child.gameObject.SetActive(false);
+                if (keepCanvasRoot != null && root == keepCanvasRoot.gameObject)
+                {
+                    continue;
+                }
+
+                if (root.GetComponentInChildren<UnityEngine.EventSystems.EventSystem>(true) != null)
+                {
+                    continue;
+                }
+
+                if (root.GetComponentInChildren<Canvas>(true) != null)
+                {
+                    root.SetActive(false);
+                }
             }
         }
 
@@ -319,11 +384,6 @@ namespace ClickerTowerDefense
             {
                 GameObject root = roots[i];
                 if (root == null || root == canvasRoot)
-                {
-                    continue;
-                }
-
-                if (root.GetComponentInChildren<Canvas>(true) != null)
                 {
                     continue;
                 }

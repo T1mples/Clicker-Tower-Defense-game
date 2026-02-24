@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using YG;
 
 namespace ClickerTowerDefense
 {
@@ -189,12 +190,12 @@ namespace ClickerTowerDefense
                 TryBindBackToStartRuntime();
             }
 
-            if (!StartScreenUI.IsOpen && Input.GetKeyDown(KeyCode.Space))
+            if (!StartScreenUI.IsOpen && !IsMenuOpen && Input.GetKeyDown(KeyCode.Space))
             {
                 OnUseSkillClicked();
             }
 
-            if (!StartScreenUI.IsOpen && !IsGameOverActive() && Input.GetKeyDown(KeyCode.Escape))
+            if (!StartScreenUI.IsOpen && !IsGameOverActive() && Input.GetKeyDown(KeyCode.Tab))
             {
                 PlayMenuToggleClickSound();
                 SetMenuOpen(!isOpen);
@@ -639,6 +640,11 @@ namespace ClickerTowerDefense
 
         private void OnUseSkillClicked()
         {
+            if (IsMenuOpen)
+            {
+                return;
+            }
+
             TryResolveSystems();
             if (skillSystem == null)
             {
@@ -664,6 +670,8 @@ namespace ClickerTowerDefense
 
         private void OnRestartClicked()
         {
+            TryUpdateBestScore();
+
             Time.timeScale = 1f;
             StartScreenUI.SkipOpenOnNextLoad();
 
@@ -676,6 +684,12 @@ namespace ClickerTowerDefense
             {
                 baseHealth.RestartScene();
                 return;
+            }
+
+            GameManager gameManager = GameManager.Instance;
+            if (gameManager != null)
+            {
+                gameManager.StopMusicAndCountdown();
             }
 
             Scene active = SceneManager.GetActiveScene();
@@ -694,7 +708,7 @@ namespace ClickerTowerDefense
                 return;
             }
 
-            baseHealth.TakeDamage(baseHealth.CurrentHealth);
+            baseHealth.ForceGameOverWithoutDamageSound();
         }
 
         private void OnSkipWaveClicked()
@@ -723,6 +737,7 @@ namespace ClickerTowerDefense
 
         private void OnBackToStartClicked()
         {
+            TryUpdateBestScore();
             StartScreenUI startScreen = ResolveStartScreen();
             if (startScreen == null)
             {
@@ -732,6 +747,30 @@ namespace ClickerTowerDefense
 
             SetMenuOpen(false);
             startScreen.Open();
+        }
+
+        private void TryUpdateBestScore()
+        {
+            if (gameManager == null)
+            {
+                gameManager = GameManager.Instance;
+            }
+
+            if (gameManager == null || YG2.saves == null)
+            {
+                return;
+            }
+
+            if (gameManager.Score <= YG2.saves.score)
+            {
+                return;
+            }
+
+            YG2.saves.score = gameManager.Score;
+            YG2.SaveProgress();
+            Debug.Log("saved on cloud");
+            YG2.SetLeaderboard("LB", gameManager.Score);
+            Debug.Log("send to leaderboard: " + gameManager.Score);
         }
 
         private void TryBindBackToStartRuntime()
@@ -1151,7 +1190,7 @@ namespace ClickerTowerDefense
                 menuRoot.SetActive(value);
             }
 
-            SetButtonColor(menuToggleButton, value ? menuOpenButtonColor : actionButtonColor);
+            SetButtonColor(menuToggleButton, value ? menuOpenButtonColor : Color.white);
 
             if (pauseGameplayWhenOpen)
             {

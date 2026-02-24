@@ -65,6 +65,18 @@ namespace ClickerTowerDefense
             }
         }
 
+        public void ForceGameOverWithoutDamageSound()
+        {
+            if (isGameOver)
+            {
+                return;
+            }
+
+            CurrentHealth = 0;
+            HealthChanged?.Invoke(CurrentHealth, maxHealth);
+            GameOver();
+        }
+
         public int Heal(int amount)
         {
             if (isGameOver || amount <= 0 || CurrentHealth >= maxHealth)
@@ -90,6 +102,12 @@ namespace ClickerTowerDefense
 
         public void RestartScene()
         {
+            GameManager gameManager = GameManager.Instance;
+            if (gameManager != null)
+            {
+                gameManager.StopMusicAndCountdown();
+            }
+
             Scene activeScene = SceneManager.GetActiveScene();
             SceneManager.LoadScene(activeScene.buildIndex);
         }
