@@ -53,11 +53,11 @@
     <script>
         const hideFullScreenButton = "";
         const buildUrl = "Build";
-        const loaderUrl = buildUrl + "/Build 1.5.loader.js";
+        const loaderUrl = buildUrl + "/Build 2.4.loader.js";
         const config = {
-            dataUrl: buildUrl + "/Build 1.5.data.br",
-            frameworkUrl: buildUrl + "/Build 1.5.framework.js.br",
-            codeUrl: buildUrl + "/Build 1.5.wasm.br",
+            dataUrl: buildUrl + "/Build 2.4.data.br",
+            frameworkUrl: buildUrl + "/Build 2.4.framework.js.br",
+            codeUrl: buildUrl + "/Build 2.4.wasm.br",
         streamingAssetsUrl: "StreamingAssets",
             companyName: "TimofeyStudios",
             productName: "Slime Attack!",
@@ -281,8 +281,14 @@
                 // Additional init1 modules
 
                 // Additional init2 modules
+await InitPlayer();
+LogStyledMessage('Init Authorization ysdk');
+
 
                 // Additional init modules
+await LoadCloud();
+LogStyledMessage('Init Storage ysdk');
+
 
                 initYSDK = true;
                 if (ygGameInstance != null)
@@ -310,7 +316,54 @@
         }
 
         // Additional script modules
-LogStyledMessage('[PluginYG2 v2.008] [Build: 5] [Platform: YandexGames]');
+LogStyledMessage('[PluginYG2 v2.008] [Build: 14] [Platform: YandexGames]');
+
+var cloudSaves = NO_DATA;
+
+function SaveCloud(jsonData, flush) {
+    if (player == null) {
+        console.error('CRASH Save Cloud: ', 'Didnt have time to load');
+        return;
+    }
+    try {
+        player.setData({
+            saves: [jsonData],
+        }, flush);
+    } catch (e) {
+        console.error('CRASH Save Cloud: ', e.message);
+    }
+}
+
+function LoadCloud() {
+    return new Promise((resolve) => {
+        if (ysdk == null) {
+            Final(NO_DATA);
+            return;
+        }
+        try {
+            player.getData(["saves"]).then(data => {
+                if (data.saves) {
+                    Final(JSON.stringify(data.saves));
+                } else {
+                    Final(NO_DATA);
+                }
+            }).catch(() => {
+                console.error('Load Cloud Error!');
+                Final(NO_DATA);
+            });
+        }
+        catch (e) {
+            console.error('CRASH Load saves Cloud: ', e.message);
+            Final(NO_DATA);
+        }
+
+        function Final(res) {
+            cloudSaves = res;
+            YG2Instance('SetLoadSaves', res);
+            resolve(res);
+        }
+    });
+}
 
 
 function StickyAdActivity(show) {
@@ -331,6 +384,102 @@ function StickyAdActivity(show) {
     } catch (e) {
         console.error('CRASH StickyAdv activity: ', e.message);
     }
+}
+
+
+function SetLeaderboard(name, score, extraData) {
+    if (!ysdk) return;
+
+    try {
+        ysdk.leaderboards.setScore(name, score, extraData);
+    } catch (e) {
+        console.error('CRASH Set Leaderboard: ', e.message);
+    }
+}
+
+function GetLeaderboard(nameLB, quantityTop, quantityAround, photoSize, auth) {
+    if (!ysdk) return;
+
+    var jsonEntries = {
+        technoName: '',
+        isDefault: false,
+        isInvertSortOrder: false,
+        decimalOffset: 0,
+        type: ''
+    };
+
+    ysdk.leaderboards.getDescription(nameLB)
+        .then(res => {
+            jsonEntries.technoName = nameLB;
+            jsonEntries.isDefault = res.default;
+            jsonEntries.isInvertSortOrder = res.description.invert_sort_order;
+            jsonEntries.decimalOffset = res.description.score_format.options.decimal_offset;
+            jsonEntries.type = res.description.type;
+
+            return ysdk.leaderboards.getEntries(nameLB, {
+                quantityTop: quantityTop,
+                includeUser: auth,
+                quantityAround: quantityAround
+            });
+        })
+        .then(res => {
+            let jsonPlayers = EntriesLB(res, photoSize);
+            let combinedJson = { ...jsonEntries, ...jsonPlayers };
+
+            YG2Instance('LeaderboardEntries', JSON.stringify(combinedJson));
+        })
+        .catch(err => {
+            if (err.code === 'LEADERBOARD_PLAYER_NOT_PRESENT')
+               LogStyledMessage('Leaderboard player not present');
+            console.error(err);
+        });
+}
+
+function EntriesLB(res, photoSize) {
+    let LbdEntriesText = '';
+    let plCount = res.entries.length;
+
+    let ranks = new Array(plCount);
+    let photos = new Array(plCount);
+    let names = new Array(plCount);
+    let scores = new Array(plCount);
+    let uniqueIDs = new Array(plCount);
+    let extraDataArray = new Array(plCount);
+
+    for (i = 0; i < plCount; i++) {
+        ranks[i] = res.entries[i].rank;
+        scores[i] = res.entries[i].score;
+        uniqueIDs[i] = res.entries[i].player.uniqueID;
+        photos[i] = res.entries[i].player.getAvatarSrc(photoSize);
+
+        if (res.entries[i].extraData == "" || res.entries[i].extraData == null)
+            extraDataArray[i] = NO_DATA;
+        else
+            extraDataArray[i] = res.entries[i].extraData;
+
+        if (res.entries[i].player.scopePermissions.public_name !== "allow")
+            names[i] = "anonymous";
+        else
+            names[i] = res.entries[i].player.publicName;
+
+        LbdEntriesText += ranks[i] + '. ' + names[i] + ": " + scores[i] + '\n';
+    }
+
+    if (plCount === 0) {
+        LbdEntriesText = 'no data';
+    }
+
+    let jsonPlayers = {
+        "entries": LbdEntriesText,
+        "ranks": ranks,
+        "photos": photos,
+        "names": names,
+        "scores": scores,
+        "uniqueIDs": uniqueIDs,
+        "extraDataArray": extraDataArray
+    };
+
+    return jsonPlayers;
 }
 
 
@@ -380,6 +529,70 @@ function InterAdvShow() {
     }
     catch (e) {
         console.error('CRASH Interstitial Adv Show: ', e.message);
+    }
+}
+
+var playerData = NO_DATA;
+let player = null;
+
+async function InitPlayer() {
+    return new Promise(async (resolve) => {
+        try {
+            if (!ysdk)
+                return Final(NotAuthorized(false));
+
+            player = await ysdk.getPlayer();
+
+            if (!player.isAuthorized())
+                return Final(NotAuthorized());
+
+            const authJson = {
+                "playerAuth": "resolved",
+                "playerName": player.getName(),
+                "playerId": player.getUniqueID(),
+                "playerPhoto": player.getPhoto('medium'),
+                "payingStatus": player.getPayingStatus()
+            };
+
+            return Final(JSON.stringify(authJson));
+        } catch (e) {
+            console.error('CRASH init Player: ', e.message);
+            return Final(NotAuthorized(false));
+        }
+
+        function Final(res) {
+            playerData = res;
+            YG2Instance('SetAuth', res);
+            resolve(res);
+        }
+    });
+}
+
+
+function NotAuthorized(isInitSDK = true) {
+    let authJson = {
+        "playerAuth": "rejected",
+        "playerName": "unauthorized",
+        "playerId": isInitSDK ? player.getUniqueID() : "unauthorized",
+        "playerPhoto": "no data",
+        "payingStatus": "unknown"
+    };
+    return JSON.stringify(authJson);
+}
+
+function OpenAuthDialog() {
+    if (ysdk !== null) {
+        try {
+            ysdk.auth.openAuthDialog().then(() => {
+                InitPlayer()
+                    .then(() => {
+                        YG2Instance('LoggedIn');
+                    });
+            });
+        }
+        catch (e) {
+            LogStyledMessage('CRASH Open Auth Dialog: ', e.message);
+        }
     }
 }
 
